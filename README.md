@@ -1,7 +1,18 @@
 # armada (Go SDK)
 
+## Install
+
+Go modules fetch directly from the repo — no registry involved:
+
 ```bash
-go get github.com/armadadelivery/sdk-go
+# latest main
+go get github.com/armadadelivery/sdk-go@main
+
+# pinned to a release tag
+go get github.com/armadadelivery/sdk-go@v0.1.0-beta.0
+
+# pinned to a commit
+go get github.com/armadadelivery/sdk-go@16c5f2fb
 ```
 
 ```go
