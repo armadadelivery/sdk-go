@@ -24,13 +24,17 @@ import (
 	"time"
 )
 
-const defaultBase = "https://sandbox.api.armadadelivery.com"
+const defaultBase = "https://api.armadadelivery.com"
 
 type Options struct {
 	APIKey    string
 	APISecret string
-	BaseURL   string        // default sandbox
-	Timeout   time.Duration // default 30s
+	// Defaults to https://api.armadadelivery.com (production). Use a
+	// Test-mode API key to simulate deliveries without dispatching a real
+	// driver. Pass https://sandbox.api.armadadelivery.com explicitly only
+	// if you need the fully-isolated sandbox environment.
+	BaseURL string
+	Timeout time.Duration // default 30s
 }
 
 type Client struct {
