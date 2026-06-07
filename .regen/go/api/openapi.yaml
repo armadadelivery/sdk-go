@@ -1,0 +1,1070 @@
+openapi: 3.1.0
+info:
+  contact:
+    email: support@armadadelivery.com
+    name: Armada API support
+    url: https://public-api-docs.armadadelivery.com
+  description: |
+    The v2 API exposes the Armada delivery platform to merchant partners. Every
+    request is authenticated with a merchant-scoped API key + secret using
+    HMAC-SHA256 request signing. All endpoints are idempotent to retry when the
+    response is a network error; duplicate keys de-dupe on `reference`.
+
+    ## Authentication
+
+    Send every request with three headers:
+
+    - `Authorization: Key <api_key_value>`
+    - `x-armada-timestamp: <milliseconds since epoch>`
+    - `x-armada-signature: <hex HMAC-SHA256>`
+
+    The signature is `HMAC_SHA256(secret, "${timestamp}.${method}.${path}.${body}")`.
+    For `GET` requests the body is the empty string. The signature must arrive
+    within 30 seconds of the timestamp.
+
+    ## Rate limits
+
+    Every response carries:
+
+    - `X-RateLimit-Limit` — the ceiling for this request's category
+    - `X-RateLimit-Remaining` — how many calls remain in the current window
+    - `X-RateLimit-Reset` — unix seconds when the window resets
+
+    On 429 the `Retry-After` header is set. Default ceilings: 300 reads / minute,
+    60 writes / minute, per API key.
+  license:
+    name: Proprietary
+  title: Armada Automated Ordering API
+  version: 2.0.0
+servers:
+- description: Sandbox
+  url: https://sandbox.api.armadadelivery.com
+- description: Production
+  url: https://api.armadadelivery.com
+security:
+- ApiKeyAuth: []
+tags:
+- description: "Create, track, cancel, retry, and estimate deliveries."
+  name: Deliveries
+- description: Manage the merchant's pickup locations.
+  name: Branches
+- description: Inspect the prepaid wallet balance.
+  name: Wallet
+- description: Consult generated invoices.
+  name: Invoices
+paths:
+  /v2/deliveries:
+    post:
+      operationId: createDelivery
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+          description: Delivery created.
+          headers:
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Create a delivery
+      tags:
+      - Deliveries
+  /v2/deliveries/{id}:
+    get:
+      operationId: getDelivery
+      parameters:
+      - $ref: "#/components/parameters/DeliveryId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+          description: OK
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Retrieve a delivery
+      tags:
+      - Deliveries
+    parameters:
+    - $ref: "#/components/parameters/DeliveryId"
+  /v2/deliveries/{id}/cancel:
+    parameters:
+    - $ref: "#/components/parameters/DeliveryId"
+    post:
+      operationId: cancelDelivery
+      parameters:
+      - $ref: "#/components/parameters/DeliveryId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/cancelDelivery_request"
+        required: false
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+          description: Canceled
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: Delivery is not in a cancellable state.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Cancel a delivery
+      tags:
+      - Deliveries
+  /v2/deliveries/{id}/retry:
+    parameters:
+    - $ref: "#/components/parameters/DeliveryId"
+    post:
+      description: |
+        Retries a delivery that reached the `failed` terminal state. Resets the
+        dispatcher trial counter and re-enqueues the order.
+      operationId: retryDelivery
+      parameters:
+      - $ref: "#/components/parameters/DeliveryId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+          description: Retry queued.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+          description: Delivery is not in a retryable state (only `failed` is retryable).
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Retry a failed delivery
+      tags:
+      - Deliveries
+  /v2/deliveries/estimate:
+    post:
+      operationId: estimateDelivery
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EstimateRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Estimate"
+          description: Estimate returned.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Estimate a delivery fee
+      tags:
+      - Deliveries
+  /v2/deliveries/estimate/static:
+    post:
+      operationId: estimateDeliveryStatic
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EstimateRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Estimate"
+          description: Estimate returned.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Estimate a delivery fee using static pricing (no live traffic).
+      tags:
+      - Deliveries
+  /v2/branches:
+    get:
+      operationId: listBranches
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/listBranches_200_response"
+          description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: List branches
+      tags:
+      - Branches
+    post:
+      operationId: createBranch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchInput"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+          description: Branch created.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+      summary: Create a branch
+      tags:
+      - Branches
+  /v2/branches/{id}:
+    delete:
+      operationId: deleteBranch
+      parameters:
+      - $ref: "#/components/parameters/BranchId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+      summary: Delete a branch
+      tags:
+      - Branches
+    get:
+      operationId: getBranch
+      parameters:
+      - $ref: "#/components/parameters/BranchId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+          description: OK
+        "404":
+          $ref: "#/components/responses/NotFound"
+      summary: Get a branch
+      tags:
+      - Branches
+    parameters:
+    - $ref: "#/components/parameters/BranchId"
+    put:
+      operationId: updateBranch
+      parameters:
+      - $ref: "#/components/parameters/BranchId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchInput"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+          description: OK
+        "404":
+          $ref: "#/components/responses/NotFound"
+      summary: Update a branch
+      tags:
+      - Branches
+  /v2/wallet:
+    get:
+      operationId: getWallet
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+          description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
+      summary: Get wallet balance
+      tags:
+      - Wallet
+  /v2/invoices:
+    get:
+      operationId: listInvoices
+      parameters:
+      - explode: true
+        in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          minimum: 1
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: perPage
+        required: false
+        schema:
+          default: 20
+          maximum: 100
+          minimum: 1
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: status
+        required: false
+        schema:
+          default: all
+          enum:
+          - unpaid
+          - paid
+          - topup
+          - all
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: periodBegin
+        required: false
+        schema:
+          format: date
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: periodEnd
+        required: false
+        schema:
+          format: date
+          type: string
+        style: form
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/listInvoices_200_response"
+          description: OK
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      summary: List invoices
+      tags:
+      - Invoices
+  /v2/invoices/{id}:
+    get:
+      operationId: getInvoice
+      parameters:
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          pattern: "^[a-f0-9]{24}$"
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+          description: OK
+        "404":
+          $ref: "#/components/responses/NotFound"
+      summary: Get an invoice
+      tags:
+      - Invoices
+    parameters:
+    - explode: false
+      in: path
+      name: id
+      required: true
+      schema:
+        pattern: "^[a-f0-9]{24}$"
+        type: string
+      style: simple
+components:
+  headers:
+    RateLimitLimit:
+      description: Request ceiling for this endpoint category.
+      explode: false
+      schema: {}
+      style: simple
+    RateLimitRemaining:
+      description: Calls remaining in the current window.
+      explode: false
+      schema: {}
+      style: simple
+    RateLimitReset:
+      description: Unix seconds when the current window resets.
+      explode: false
+      schema: {}
+      style: simple
+  parameters:
+    DeliveryId:
+      explode: false
+      in: path
+      name: id
+      required: true
+      schema:
+        pattern: "^[a-f0-9]{24}$"
+        type: string
+      style: simple
+    BranchId:
+      explode: false
+      in: path
+      name: id
+      required: true
+      schema:
+        pattern: "^[a-f0-9]{24}$"
+        type: string
+      style: simple
+  responses:
+    BadRequest:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+      description: Validation error.
+    Unauthorized:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+      description: Missing or invalid credentials / signature.
+    Forbidden:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+      description: API key lacks the required permission.
+    NotFound:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+      description: Resource not found or not owned by this merchant.
+    RateLimited:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          description: Seconds until the window resets.
+          explode: false
+          schema:
+            type: integer
+          style: simple
+        X-RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        X-RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        X-RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+  schemas:
+    Error:
+      example:
+        error: error
+        message: message
+      properties:
+        error:
+          description: Machine-readable error code.
+          type: string
+        message:
+          description: Human-readable description.
+          type: string
+      required:
+      - error
+    Payment:
+      example:
+        amount: 0.8008281904610115
+        type: paid
+      properties:
+        amount:
+          type: number
+        type:
+          enum:
+          - paid
+          - cash
+          type: string
+      required:
+      - amount
+      - type
+    LocationAddress:
+      example:
+        instructions: instructions
+        contact_name: contact_name
+        contact_phone: contact_phone
+        first_line: first_line
+        latitude: 6.027456183070403
+        floor: floor
+        apartment: apartment
+        longitude: 1.4658129805029452
+      properties:
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        first_line:
+          type: string
+        floor:
+          type: string
+        apartment:
+          type: string
+        instructions:
+          type: string
+      required:
+      - contact_name
+      - contact_phone
+      - latitude
+      - longitude
+    KuwaitAddress:
+      properties:
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        area:
+          type: string
+        block:
+          type: string
+        street:
+          type: string
+        building:
+          type: string
+        floor:
+          type: string
+        apartment:
+          type: string
+        instructions:
+          type: string
+      required:
+      - area
+      - block
+      - building
+      - contact_name
+      - contact_phone
+      - street
+    BahrainAddress:
+      $ref: "#/components/schemas/KuwaitAddress"
+    KsaAddress:
+      properties:
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        city:
+          type: string
+        street:
+          type: string
+        district:
+          type: string
+        building:
+          type: string
+        floor:
+          type: string
+        apartment:
+          type: string
+        instructions:
+          type: string
+      required:
+      - building
+      - city
+      - contact_name
+      - contact_phone
+      - district
+      - street
+    KsaShortAddress:
+      properties:
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        short_address:
+          type: string
+        instructions:
+          type: string
+      required:
+      - contact_name
+      - contact_phone
+      - short_address
+    BranchOrigin:
+      example:
+        branch_id: branch_id
+      properties:
+        branch_id:
+          pattern: "^[a-f0-9]{24}$"
+          type: string
+      required:
+      - branch_id
+    DeliveryRequest:
+      example:
+        reference: reference
+        origin:
+          branch_id: branch_id
+        origin_format: location_format
+        destination:
+          instructions: instructions
+          contact_name: contact_name
+          contact_phone: contact_phone
+          first_line: first_line
+          latitude: 6.027456183070403
+          floor: floor
+          apartment: apartment
+          longitude: 1.4658129805029452
+        payment:
+          amount: 0.8008281904610115
+          type: paid
+        scheduled_date: 2000-01-23T04:56:07.000+00:00
+        destination_format: location_format
+      properties:
+        reference:
+          description: Partner-supplied unique id used for de-duplication.
+          type: string
+        scheduled_date:
+          format: date-time
+          type: string
+        payment:
+          $ref: "#/components/schemas/Payment"
+        origin_format:
+          enum:
+          - location_format
+          - branch_format
+          type: string
+        origin:
+          $ref: "#/components/schemas/DeliveryRequest_origin"
+        destination_format:
+          enum:
+          - location_format
+          - kuwait_format
+          - bahrain_format
+          - ksa_format
+          - ksa_short_format
+          type: string
+        destination:
+          $ref: "#/components/schemas/DeliveryRequest_destination"
+      required:
+      - destination
+      - destination_format
+      - origin
+      - origin_format
+      - payment
+      - reference
+    EstimateRequest:
+      example:
+        origin:
+          branch_id: branch_id
+        origin_format: location_format
+        destination:
+          instructions: instructions
+          contact_name: contact_name
+          contact_phone: contact_phone
+          first_line: first_line
+          latitude: 6.027456183070403
+          floor: floor
+          apartment: apartment
+          longitude: 1.4658129805029452
+        destination_format: location_format
+      properties:
+        origin_format:
+          enum:
+          - location_format
+          - branch_format
+          type: string
+        origin:
+          $ref: "#/components/schemas/DeliveryRequest_origin"
+        destination_format:
+          enum:
+          - location_format
+          - kuwait_format
+          - bahrain_format
+          - ksa_format
+          - ksa_short_format
+          type: string
+        destination:
+          $ref: "#/components/schemas/DeliveryRequest_destination"
+      required:
+      - destination
+      - destination_format
+      - origin
+      - origin_format
+    Estimate:
+      example:
+        duration: 1.4658129805029452
+        distance: 6.027456183070403
+        fee: 0.8008281904610115
+        currency: currency
+      properties:
+        fee:
+          type: number
+        currency:
+          type: string
+        distance:
+          description: Meters.
+          type: number
+        duration:
+          description: Seconds.
+          type: number
+    Delivery:
+      example:
+        delivery_fee: 6.027456183070403
+        amount: 0.8008281904610115
+        code: code
+        driver:
+          phone: phone
+          latitude: 5.637376656633329
+          name: name
+          longitude: 2.3021358869347655
+        test_mode: true
+        created_at: 2000-01-23T04:56:07.000+00:00
+        logistics:
+          estimated_distance: 7.061401241503109
+          pickup_qr_url: https://openapi-generator.tech
+          estimated_duration: 9.301444243932576
+          tracking_url: https://openapi-generator.tech
+        currency: currency
+        status: pending
+        customer:
+          address: address
+          phone: phone
+          latitude: 1.4658129805029452
+          name: name
+          longitude: 5.962133916683182
+      properties:
+        status:
+          enum:
+          - pending
+          - accepted
+          - dispatched
+          - en_route
+          - completed
+          - canceled
+          - failed
+          type: string
+        code:
+          type: string
+        test_mode:
+          type: boolean
+        amount:
+          type: number
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          type: string
+        delivery_fee:
+          type: number
+        customer:
+          $ref: "#/components/schemas/Delivery_customer"
+        driver:
+          $ref: "#/components/schemas/Delivery_driver"
+        logistics:
+          $ref: "#/components/schemas/Delivery_logistics"
+    BranchInput:
+      example:
+        address: address
+        phone: phone
+        name: name
+        location:
+          lng: 6.027456183070403
+          lat: 0.8008281904610115
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        location:
+          $ref: "#/components/schemas/BranchInput_location"
+      required:
+      - address
+      - name
+      - phone
+    Branch:
+      example:
+        address: address
+        phone: phone
+        latitude: 0.8008281904610115
+        name: name
+        created_at: 2000-01-23T04:56:07.000+00:00
+        id: id
+        longitude: 6.027456183070403
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        created_at:
+          format: date-time
+          type: string
+    Wallet:
+      example:
+        balance: 0.8008281904610115
+        currency: currency
+        warningBalanceLevel: 6.027456183070403
+      properties:
+        balance:
+          type: number
+        currency:
+          type: string
+        warningBalanceLevel:
+          nullable: true
+          type: number
+    Invoice:
+      example:
+        createdAt: 2000-01-23T04:56:07.000+00:00
+        amount: 5.962133916683182
+        ordersCount: 5
+        dueOn: 2000-01-23
+        deliveryTripsCount: 2
+        currency: currency
+        id: id
+        invoiceNo: invoiceNo
+        type: REGULAR
+        periodBegin: 2000-01-23
+        status: ISSUED
+        periodEnd: 2000-01-23
+      properties:
+        id:
+          type: string
+        invoiceNo:
+          type: string
+        type:
+          enum:
+          - REGULAR
+          - CUSTOMER_ORDER
+          - WALLET
+          - TOPUP_WALLET
+          - REFUND_WALLET
+          - REFUND
+          - TAP_WALLET
+          type: string
+        status:
+          enum:
+          - ISSUED
+          - PAID
+          - PENDING
+          - SENT
+          - CANCELED
+          - AUTHORIZED
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        ordersCount:
+          type: integer
+        deliveryTripsCount:
+          type: integer
+        periodBegin:
+          format: date
+          type: string
+        periodEnd:
+          format: date
+          type: string
+        dueOn:
+          format: date
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+    cancelDelivery_request:
+      properties:
+        reason:
+          description: Optional free-text cancellation reason.
+          type: string
+    listBranches_200_response:
+      example:
+        branches:
+        - address: address
+          phone: phone
+          latitude: 0.8008281904610115
+          name: name
+          created_at: 2000-01-23T04:56:07.000+00:00
+          id: id
+          longitude: 6.027456183070403
+        - address: address
+          phone: phone
+          latitude: 0.8008281904610115
+          name: name
+          created_at: 2000-01-23T04:56:07.000+00:00
+          id: id
+          longitude: 6.027456183070403
+      properties:
+        branches:
+          items:
+            $ref: "#/components/schemas/Branch"
+          type: array
+    listInvoices_200_response:
+      example:
+        total: 1
+        perPage: 6
+        invoices:
+        - createdAt: 2000-01-23T04:56:07.000+00:00
+          amount: 5.962133916683182
+          ordersCount: 5
+          dueOn: 2000-01-23
+          deliveryTripsCount: 2
+          currency: currency
+          id: id
+          invoiceNo: invoiceNo
+          type: REGULAR
+          periodBegin: 2000-01-23
+          status: ISSUED
+          periodEnd: 2000-01-23
+        - createdAt: 2000-01-23T04:56:07.000+00:00
+          amount: 5.962133916683182
+          ordersCount: 5
+          dueOn: 2000-01-23
+          deliveryTripsCount: 2
+          currency: currency
+          id: id
+          invoiceNo: invoiceNo
+          type: REGULAR
+          periodBegin: 2000-01-23
+          status: ISSUED
+          periodEnd: 2000-01-23
+        page: 0
+      properties:
+        page:
+          type: integer
+        perPage:
+          type: integer
+        total:
+          type: integer
+        invoices:
+          items:
+            $ref: "#/components/schemas/Invoice"
+          type: array
+    DeliveryRequest_origin:
+      oneOf:
+      - $ref: "#/components/schemas/BranchOrigin"
+      - $ref: "#/components/schemas/LocationAddress"
+    DeliveryRequest_destination:
+      oneOf:
+      - $ref: "#/components/schemas/LocationAddress"
+      - $ref: "#/components/schemas/KuwaitAddress"
+      - $ref: "#/components/schemas/BahrainAddress"
+      - $ref: "#/components/schemas/KsaAddress"
+      - $ref: "#/components/schemas/KsaShortAddress"
+    Delivery_customer:
+      example:
+        address: address
+        phone: phone
+        latitude: 1.4658129805029452
+        name: name
+        longitude: 5.962133916683182
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        latitude:
+          nullable: true
+          type: number
+        longitude:
+          nullable: true
+          type: number
+    Delivery_driver:
+      example:
+        phone: phone
+        latitude: 5.637376656633329
+        name: name
+        longitude: 2.3021358869347655
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        latitude:
+          nullable: true
+          type: number
+        longitude:
+          nullable: true
+          type: number
+    Delivery_logistics:
+      example:
+        estimated_distance: 7.061401241503109
+        pickup_qr_url: https://openapi-generator.tech
+        estimated_duration: 9.301444243932576
+        tracking_url: https://openapi-generator.tech
+      properties:
+        estimated_distance:
+          description: Meters.
+          type: number
+        estimated_duration:
+          description: Seconds.
+          type: number
+        tracking_url:
+          format: uri
+          type: string
+        pickup_qr_url:
+          format: uri
+          type: string
+    BranchInput_location:
+      example:
+        lng: 6.027456183070403
+        lat: 0.8008281904610115
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+  securitySchemes:
+    ApiKeyAuth:
+      description: |
+        `Authorization: Key <api_key_value>` combined with HMAC-SHA256 signing
+        (`x-armada-timestamp` + `x-armada-signature` headers). See the Authentication
+        section of the API overview for the exact formula.
+      in: header
+      name: Authorization
+      type: apiKey
